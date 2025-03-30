@@ -33,7 +33,7 @@ spec:
                     'until mysqladmin ping -u ${MYSQL_USER} -p${MYSQL_PASSWORD} -h istory-db-lb; do echo waiting for database; sleep 2; done;']
       containers:
         - name: istory
-          image: dangtong/istory:latest
+          image: dangtong76/istory:latest
           envFrom:
             - configMapRef:
                 name: istory-app-config
