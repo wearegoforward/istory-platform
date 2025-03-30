@@ -17,7 +17,7 @@ patches:
 images:
 - name: dangtong76/istory
   newName: dangtong76/istory
-  newTag: "22"
+  newTag: "23"
 
 generatorOptions:
   disableNameSuffixHash: true
