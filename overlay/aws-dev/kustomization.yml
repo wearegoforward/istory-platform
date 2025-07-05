@@ -1,0 +1,23 @@
+resources:
+  - ../../base/istory-app
+  - ../../base/istory-db
+
+namespace: istory-dev
+
+patches:
+  - path: patch-lb-annotations.yml
+    target:
+      kind: Service
+      name: istory-app-lb
+  - path: patch-deploy.yml
+    target:
+      kind: Deployment
+      name: istory-app-deploy
+
+images:
+  # base/istory-app/istory-app-deploy.yml 내의 이미지 이름과 동일해야 변경됨
+  - name: testuserd/istory # 변경필요 
+    newTag: latest
+
+generatorOptions:
+  disableNameSuffixHash: true

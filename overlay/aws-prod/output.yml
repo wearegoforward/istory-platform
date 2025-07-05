@@ -1,0 +1,191 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp2-persistent
+parameters:
+  fsType: ext4
+  type: gp2
+provisioner: kubernetes.io/aws-ebs
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: v1
+data:
+  SPRING_APPLICATION_NAME: USER-SERVICE
+  SPRING_DATASOURCE_DRIVERCLASSNAME: com.mysql.cj.jdbc.Driver
+  SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:admin123}
+  SPRING_DATASOURCE_URL: jdbc:mysql://localhost:3306/istory?useSSL
+  SPRING_DATASOURCE_USERNAME: ${MYSQL_USERNAME:dangtong}
+  SPRING_JPA_DATABASEPLATFORM: org.hibernate.dialect.MySQL8Dialect
+  SPRING_JPA_HIBERNATE_DDLAUTO: create-drop
+  SPRING_JPA_SHOWSQL: "true"
+  SPRING_JWT_ISSUER: user@gmail.com
+  SPRING_JWT_SECRET_KEY: study-springboot
+kind: ConfigMap
+metadata:
+  name: istory-app-config
+  namespace: istory-prod
+---
+apiVersion: v1
+data:
+  MYSQL_PASSWORD: dXNlcjEyMzQ1
+  MYSQL_USER: dXNlcg==
+kind: Secret
+metadata:
+  name: istory-db-secret
+  namespace: istory-prod
+type: Opaque
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    istory.io/env: prod
+    istory.io/infra: aws
+    istory.io/tier: app-lb
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-type: external
+  name: istory-app-lb
+  namespace: istory-prod
+spec:
+  ports:
+  - name: istory-app-lb
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: istory-app
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 800
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: istory-db-lb
+  namespace: istory-prod
+spec:
+  ports:
+  - name: mysql-db-lb
+    port: 3306
+    protocol: TCP
+  selector:
+    app: mysql
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app: mysql
+  name: mysql-pv-claim
+  namespace: istory-prod
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: gp2-persistent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    istory.io/env: prod
+    istory.io/infra: aws
+    istory.io/tier: backend-app
+  labels:
+    app: istory-app
+  name: istory-app-deploy
+  namespace: istory-prod
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: istory-app
+  template:
+    metadata:
+      labels:
+        app: istory-app
+    spec:
+      containers:
+      - env:
+        - name: spring.datasource.password
+          valueFrom:
+            secretKeyRef:
+              key: MYSQL_PASSWORD
+              name: istory-db-secret
+        - name: spring.datasource.username
+          valueFrom:
+            secretKeyRef:
+              key: MYSQL_USER
+              name: istory-db-secret
+        envFrom:
+        - configMapRef:
+            name: istory-app-config
+        image: testuserd/istory:latest
+        name: istory
+        ports:
+        - containerPort: 3306
+          name: istory
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          successThreshold: 2
+          timeoutSeconds: 3
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - until mysqladmin ping -u ${MYSQL_USER} -p${MYSQL_PASSWORD} -h istory-db-lb;
+          do echo waiting for database; sleep 2; done;
+        env:
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              key: MYSQL_USER
+              name: istory-db-secret
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: MYSQL_PASSWORD
+              name: istory-db-secret
+        image: mysql:8.0
+        name: check-mysql-ready
+      restartPolicy: Always
+      volumes:
+      - configMap:
+          name: istory-app-config
+        name: application-config
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: mysql
+  name: istory-db
+  namespace: istory-prod
+spec:
+  containers:
+  - envFrom:
+    - secretRef:
+        name: istory-db-secret
+    image: mysql/mysql-server
+    name: mysql
+    ports:
+    - containerPort: 3306
+      name: mysql
+    volumeMounts:
+    - mountPath: /var/lib/mysql
+      name: mysql-persistent-storage
+  volumes:
+  - name: mysql-persistent-storage
+    persistentVolumeClaim:
+      claimName: mysql-pv-claim
